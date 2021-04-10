@@ -149,24 +149,11 @@ resource "aws_instance" "master_ec2" {
   key_name = var.key
   security_groups = [aws_security_group.master_sg.id]
   subnet_id = aws_subnet.private_B.id
-  user_data = file("second_app.sh")
+  user_data = file("first_app.sh")
   tags = {
     Name = "master_ec2"
   }
 }
-
-resource "aws_instance" "second_ec2" {
-  ami           = "ami-068d43a544160b7ef"
-  instance_type = "t2.micro"
-  key_name = var.key
-  security_groups = [aws_security_group.master_sg.id]
-  subnet_id = aws_subnet.private_B.id
-  user_data = file("first_app.sh")
-  tags = {
-    Name = "Second_master_ec2"
-  }
-}
-
 
 resource "aws_lb" "master_elb" {
   name               = "masterelb"
@@ -204,10 +191,39 @@ resource "aws_lb_target_group_attachment" "master_TG" {
   port             = 80
 }
 
-resource "aws_lb_target_group_attachment" "master_TGa" {
-  target_group_arn = aws_lb_target_group.masterTG.arn
-  target_id        = aws_instance.second_ec2.id
-  port             = 80
+resource "aws_ami_from_instance" "master_AMI" {
+  name               = "master_AMI"
+  source_instance_id = aws_instance.master_ec2.id
+  tags = {
+    Name = "master_AMI"
+  }
 }
 
+resource "aws_launch_configuration" "master_conf" {
+  name          = "master_config"
+  image_id      = aws_ami_from_instance.master_AMI.id
+  instance_type = "t2.micro"
+  security_groups    = [aws_security_group.master_sg.id]
+  key_name = var.key
+}
 
+resource "aws_autoscaling_group" "Master_ASG" {
+  name                      = "MAster_ASG"
+  max_size                  = 3
+  min_size                  = 2
+  health_check_grace_period = 300
+  health_check_type         = "EC2"
+  desired_capacity          = 2
+  force_delete              = true
+  launch_configuration      = aws_launch_configuration.master_conf.id
+  vpc_zone_identifier       = [aws_subnet.private_B.id]
+}
+
+resource "aws_autoscaling_attachment" "Master_asg_attachment" {
+  autoscaling_group_name = aws_autoscaling_group.Master_ASG.id
+  alb_target_group_arn   = aws_lb_target_group.masterTG.arn
+}
+
+output "elb_dns" {
+   value = aws_lb.master_elb.dns_name
+}
